@@ -25,7 +25,12 @@ impl EventHandler for Bot {
     }
 
     async fn message(&self, ctx: Context, msg: Message) {
-        if ([759570155763793950, 380868497867014146]).contains(&msg.author.id.get()) {
+        if (include_str!("users")
+            .lines()
+            .flat_map(|x| x.parse())
+            .collect::<Vec<u64>>())
+        .contains(&msg.author.id.get())
+        {
             let ac = AhoCorasick::builder()
                 .ascii_case_insensitive(true)
                 .build(include_str!("patterns").lines())
