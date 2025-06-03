@@ -21,6 +21,7 @@
         mkShell {
           buildInputs = [openssl];
           nativeBuildInputs = [
+            cargo-shuttle
             nil
             nixd
             alejandra
