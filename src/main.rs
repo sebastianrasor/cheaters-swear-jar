@@ -1,4 +1,5 @@
-use aho_corasick::AhoCorasick;
+mod perspective;
+
 use anyhow::Context as _;
 use serenity::all::Timestamp;
 use serenity::async_trait;
@@ -16,7 +17,9 @@ impl TypeMapKey for SwearCounter {
     type Value = Arc<RwLock<HashMap<u64, u8>>>;
 }
 
-struct Bot {}
+struct Bot {
+    google_api_key: String,
+}
 
 #[async_trait]
 impl EventHandler for Bot {
@@ -31,20 +34,17 @@ impl EventHandler for Bot {
             .collect::<Vec<u64>>())
         .contains(&msg.author.id.get())
         {
-            let ac = AhoCorasick::builder()
-                .ascii_case_insensitive(true)
-                .build(include_str!("patterns").lines())
-                .unwrap();
+            let Ok(analyze_comment_response) =
+                perspective::analyze_comment(&self.google_api_key, &msg.content).await
+            else {
+                return;
+            };
 
-            if ac
-                .find(
-                    &msg.content
-                        .chars()
-                        .filter(|c| !c.is_whitespace())
-                        .collect::<String>(),
-                )
-                .is_none()
-            {
+            let Some(score) = analyze_comment_response.unpack_score_value("PROFANITY") else {
+                return;
+            };
+
+            if score < 0.5 {
                 return;
             }
 
@@ -101,11 +101,15 @@ async fn serenity(
         .get("DISCORD_TOKEN")
         .context("'DISCORD_TOKEN' was not found")?;
 
+    let google_api_key = secret_store
+        .get("GOOGLE_API_KEY")
+        .context("'GOOGLE_API_KEY' was not found")?;
+
     let intents = serenity::model::gateway::GatewayIntents::non_privileged()
         | serenity::model::gateway::GatewayIntents::MESSAGE_CONTENT;
 
     let client = Client::builder(discord_token, intents)
-        .event_handler(Bot {})
+        .event_handler(Bot { google_api_key })
         .await
         .expect("Err creating client");
 
