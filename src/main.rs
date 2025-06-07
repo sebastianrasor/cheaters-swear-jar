@@ -6,14 +6,14 @@ use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
 use shuttle_runtime::SecretStore;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
 
-struct SwearCount;
+struct SwearCounter;
 
-impl TypeMapKey for SwearCount {
-    type Value = Arc<AtomicUsize>;
+impl TypeMapKey for SwearCounter {
+    type Value = Arc<RwLock<HashMap<u64, u8>>>;
 }
 
 struct Bot {}
@@ -50,17 +50,30 @@ impl EventHandler for Bot {
 
             let _ = msg.react(&ctx, '‼').await;
 
-            let swear_data = {
+            let counter_lock = {
                 let data_read = ctx.data.read().await;
+
                 data_read
-                    .get::<SwearCount>()
-                    .expect("Expected SwearCount in TypeMap.")
+                    .get::<SwearCounter>()
+                    .expect("Expected SwearCounter in TypeMap.")
                     .clone()
             };
 
-            let previous_swear_count = swear_data.fetch_add(1, Ordering::SeqCst);
-            if previous_swear_count == 2 {
-                let _ = swear_data.fetch_sub(3, Ordering::SeqCst);
+            let third_swear: bool;
+            {
+                let mut counter = counter_lock.write().await;
+
+                let entry = counter.entry(msg.author.id.into()).or_insert(0);
+                if *entry == 2 {
+                    third_swear = true;
+                    *entry = 0;
+                } else {
+                    third_swear = false;
+                    *entry += 1;
+                }
+            }
+
+            if third_swear {
                 let _ = msg
                     .reply(&ctx, "Stop swearing. You need a 5-minute timeout.")
                     .await;
@@ -98,7 +111,7 @@ async fn serenity(
 
     {
         let mut data = client.data.write().await;
-        data.insert::<SwearCount>(Arc::new(AtomicUsize::new(0)));
+        data.insert::<SwearCounter>(Arc::new(RwLock::new(HashMap::default())));
     }
 
     Ok(client.into())
