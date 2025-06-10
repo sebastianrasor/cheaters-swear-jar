@@ -10,7 +10,7 @@ use serenity::prelude::*;
 use shuttle_runtime::SecretStore;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{event, info, instrument, Level};
 
 const GIFS: &str = include_str!("gifs");
 
@@ -26,12 +26,15 @@ struct Bot {
 
 #[async_trait]
 impl EventHandler for Bot {
-    async fn ready(&self, _ctx: Context, ready: Ready) {
-        info!("{} is connected!", ready.user.name);
+    #[instrument(skip_all, fields(context = ?_ctx, ready = ?_ready))]
+    async fn ready(&self, _ctx: Context, _ready: Ready) {
+        event!(Level::INFO, "Bot is ready.");
     }
 
+    #[instrument(skip_all, fields(author_username = msg.author.name, author_discriminator = msg.author.discriminator, msg_content = msg.content))]
     async fn message(&self, ctx: Context, msg: Message) {
         let Some(guild_id) = msg.guild_id else {
+            event!(Level::DEBUG, ?msg.guild_id, "Message not from guild.");
             return;
         };
         if guild_id == 316738004335067139
@@ -41,7 +44,17 @@ impl EventHandler for Bot {
                 .collect::<Vec<&str>>()
                 .contains(&msg.content.as_str())
         {
-            let _ = msg.react(&ctx, EmojiId::new(1171493411270967447)).await;
+            let react_result = msg.react(&ctx, EmojiId::new(1171493411270967447)).await;
+
+            event!(
+                Level::DEBUG,
+                react_okay = react_result.is_ok(),
+                "Reacted to message with anti SGA propaganda gif."
+            );
+
+            if let Err(error) = react_result {
+                event!(Level::ERROR, ?error, "Failed to react to message.");
+            }
         }
         if (include_str!("users")
             .lines()
@@ -49,21 +62,47 @@ impl EventHandler for Bot {
             .collect::<Vec<u64>>())
         .contains(&msg.author.id.get())
         {
-            let Ok(analyze_comment_response) =
-                perspective::analyze_comment(&self.google_api_key, &msg.content).await
-            else {
-                return;
+            let analyze_comment_result =
+                perspective::analyze_comment(&self.google_api_key, &msg.content).await;
+            let analyze_comment_response = match analyze_comment_result {
+                Ok(response) => response,
+                Err(error) => {
+                    event!(Level::ERROR, ?error, "Perspective comment analysis failed.");
+                    return;
+                }
             };
 
-            let Some(score) = analyze_comment_response.unpack_score_value("PROFANITY") else {
-                return;
+            let score_option = analyze_comment_response.unpack_score_value("PROFANITY");
+            let score = match score_option {
+                Some(score) => score,
+                None => {
+                    event!(
+                        Level::ERROR,
+                        ?analyze_comment_response,
+                        "Perspective response did not contain profanity score"
+                    );
+                    return;
+                }
             };
 
             if score < 0.5 {
+                event!(Level::DEBUG, "Profanity score did not meet threshold.");
                 return;
             }
 
-            let _ = msg.react(&ctx, '‼').await;
+            {
+                let react_result = msg.react(&ctx, '‼').await;
+
+                event!(
+                    Level::DEBUG,
+                    react_okay = react_result.is_ok(),
+                    "Reacted to message with profanity."
+                );
+
+                if let Err(error) = react_result {
+                    event!(Level::ERROR, ?error, "Failed to react to message.");
+                }
+            }
 
             let counter_lock = {
                 let data_read = ctx.data.read().await;
@@ -89,20 +128,60 @@ impl EventHandler for Bot {
             }
 
             if third_swear {
-                let _ = msg
-                    .reply(&ctx, "Stop swearing. You need a 5-minute timeout.")
-                    .await;
-                let Ok(mut member) = msg.member(&ctx).await else {
-                    return;
-                };
-                let Ok(timeout_end_time) =
-                    Timestamp::from_unix_timestamp(msg.timestamp.unix_timestamp() + 300)
-                else {
-                    return;
-                };
-                let _ = member
-                    .disable_communication_until_datetime(&ctx, timeout_end_time)
-                    .await;
+                '_reply_block: {
+                    let reply_result = msg
+                        .reply(&ctx, "Stop swearing. You need a 5-minute timeout.")
+                        .await;
+
+                    event!(
+                        Level::DEBUG,
+                        reply_okay = reply_result.is_ok(),
+                        "Replied to 3rd message with swear."
+                    );
+
+                    if let Err(error) = reply_result {
+                        event!(Level::ERROR, ?error, "Failed to reply to message.");
+                        return;
+                    }
+                }
+                '_mute_block: {
+                    let mut member = {
+                        let result = msg.member(&ctx).await;
+                        match result {
+                            Ok(member) => member,
+                            Err(error) => {
+                                event!(Level::ERROR, ?error, "Error retrieving member.");
+                                return;
+                            }
+                        }
+                    };
+
+                    let timeout_end_time = {
+                        let timestamp_result =
+                            Timestamp::from_unix_timestamp(msg.timestamp.unix_timestamp() + 300);
+                        match timestamp_result {
+                            Ok(timestamp) => timestamp,
+                            Err(error) => {
+                                event!(Level::ERROR, ?error, "Error creating timestamp.");
+                                return;
+                            }
+                        }
+                    };
+
+                    let timeout_result = member
+                        .disable_communication_until_datetime(&ctx, timeout_end_time)
+                        .await;
+
+                    event!(
+                        Level::DEBUG,
+                        react_okay = timeout_result.is_ok(),
+                        "Timed out member for swearing too many times."
+                    );
+
+                    if let Err(error) = timeout_result {
+                        event!(Level::ERROR, ?error, "Failed to timeout member.");
+                    }
+                }
             }
         }
     }
