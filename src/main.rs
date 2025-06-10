@@ -1,6 +1,7 @@
 mod perspective;
 
 use anyhow::Context as _;
+use serenity::all::EmojiId;
 use serenity::all::Timestamp;
 use serenity::async_trait;
 use serenity::model::channel::Message;
@@ -10,6 +11,8 @@ use shuttle_runtime::SecretStore;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
+
+const GIFS: &str = include_str!("gifs");
 
 struct SwearCounter;
 
@@ -28,6 +31,18 @@ impl EventHandler for Bot {
     }
 
     async fn message(&self, ctx: Context, msg: Message) {
+        let Some(guild_id) = msg.guild_id else {
+            return;
+        };
+        if guild_id == 316738004335067139
+            && !msg.content.is_empty()
+            && GIFS
+                .lines()
+                .collect::<Vec<&str>>()
+                .contains(&msg.content.as_str())
+        {
+            let _ = msg.react(&ctx, EmojiId::new(1171493411270967447)).await;
+        }
         if (include_str!("users")
             .lines()
             .flat_map(|x| x.parse())
