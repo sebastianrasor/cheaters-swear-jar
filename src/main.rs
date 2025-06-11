@@ -10,7 +10,7 @@ use serenity::prelude::*;
 use shuttle_runtime::SecretStore;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{event, info, instrument, Level};
+use tracing::{event, instrument, Level};
 
 const GIFS: &str = include_str!("gifs");
 
