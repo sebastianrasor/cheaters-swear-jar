@@ -86,7 +86,11 @@ impl EventHandler for Bot {
             };
 
             if score < 0.6 {
-                event!(Level::INFO, "Profanity score did not meet threshold.");
+                event!(
+                    Level::DEBUG,
+                    profanity_score = score,
+                    "Profanity score did not meet threshold."
+                );
                 return;
             }
 
