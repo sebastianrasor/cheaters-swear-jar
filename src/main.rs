@@ -1,14 +1,7 @@
 mod perspective;
 
 use anyhow::Context as _;
-use serenity::all::ChannelId;
-use serenity::all::CreateEmbed;
-use serenity::all::CreateEmbedAuthor;
-use serenity::all::CreateEmbedFooter;
-use serenity::all::CreateMessage;
 use serenity::all::EmojiId;
-use serenity::all::GuildId;
-use serenity::all::MessageId;
 use serenity::all::Timestamp;
 use serenity::async_trait;
 use serenity::cache::Settings as CacheSettings;
@@ -37,71 +30,6 @@ impl EventHandler for Bot {
     #[instrument(skip(self))]
     async fn ready(&self, _ctx: Context, _ready: Ready) {
         event!(Level::INFO, "Bot is ready.");
-    }
-
-    #[instrument(skip(self))]
-    async fn message_delete(
-        &self,
-        ctx: Context,
-        channel_id: ChannelId,
-        deleted_message_id: MessageId,
-        guild_id: Option<GuildId>,
-    ) {
-        if guild_id.is_none() {
-            return;
-        }
-
-        let deleted_message = {
-            match channel_id.message(&ctx, deleted_message_id).await {
-                Ok(message) => message,
-                Err(_) => {
-                    event!(Level::ERROR, "No message in cache.");
-                    return;
-                }
-            }
-        };
-
-        if !deleted_message.mentions.is_empty() {
-            event!(
-                Level::INFO,
-                ?deleted_message,
-                "Ghost ping detected, sending message."
-            );
-
-            let footer = {
-                match deleted_message.author.avatar_url() {
-                    Some(avatar_url) => CreateEmbedFooter::new(format!(
-                        "{} ({})",
-                        deleted_message.author.tag(),
-                        deleted_message.author.id
-                    ))
-                    .icon_url(avatar_url),
-                    None => CreateEmbedFooter::new(format!(
-                        "{} ({})",
-                        deleted_message.author.tag(),
-                        deleted_message.author.id
-                    )),
-                }
-            };
-            let embed = CreateEmbed::new()
-                .title("Ghost Ping Detected")
-                .description(deleted_message.content_safe(&ctx))
-                .footer(footer)
-                .timestamp(deleted_message.timestamp);
-            let message_builder = CreateMessage::new().embed(embed);
-            match channel_id.send_message(&ctx, message_builder).await {
-                Ok(response_message) => {
-                    event!(
-                        Level::INFO,
-                        response_link = response_message.link(),
-                        "Responded to ghost ping."
-                    );
-                }
-                Err(error) => {
-                    event!(Level::ERROR, ?error, "Failed to respond to ghost ping.");
-                }
-            }
-        }
     }
 
     #[instrument(skip_all, fields(author_username = msg.author.name, author_discriminator = msg.author.discriminator, msg_content = msg.content))]
